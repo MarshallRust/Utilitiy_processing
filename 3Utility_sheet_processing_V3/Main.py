@@ -4,15 +4,16 @@ from Effective_dates_class import EffectiveDates
 from Due_date_class import DueDate
 from pytesseract import pytesseract
 from pdf2image import convert_from_path
+import fitz
 from PIL import Image
 from datetime import date
 from openpyxl import load_workbook
 from Amount_class import Amount
 import os
 import numpy as np
-import time
+import platform
 
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
 def process_with_everything(image, company):
     data = []
@@ -59,32 +60,26 @@ def make_and_save_pdf(images):
 
 def parse_month(page):
     month_str = str(page[1]).split("/")[0]
-    index_to_search_for_month_name = int(month_str) - 1
-    return MONTHS[index_to_search_for_month_name]
+    return MONTHS[int(month_str)-1]
 
 def open_sheet(wb, tab_name):
     if tab_name in wb.sheetnames:
         print(f"Opened tab: {tab_name}")
         return wb[tab_name]
-    print(f"Tab '{tab_name}' not found in workbook.")
     return None
 
 def find_starting_cell(ws, targets):
     for row in ws.iter_rows(min_col=1, max_col=1):
         cell = row[0]
         if cell.value is not None and cell.value in targets:
-            print(f"Found {cell.value} at row {cell.row}")
             return cell
-    print("No target found")
     return None
 
 def find_month_column(ws, header_row, month_name):
     for col in range(2, ws.max_column + 1):
         header = ws.cell(row=header_row, column=col).value
         if header and str(header).strip() == month_name:
-            print(f"Found {month_name} at column {col} in row {header_row}")
             return col, header_row - 1
-    print(f"Month '{month_name}' not found")
     return None
 
 def write_values(ws, values_to_write, target_rows, col):
@@ -97,8 +92,7 @@ def add_to_excel_sheet(page, image):
         return image
     try:
         month_name = parse_month(page)
-    except Exception as e:
-        print(f"Failed to parse month from {page[1] if len(page) > 1 else 'N/A'}: {e}")
+    except:
         return image
 
     file_path = "Utilities Billed to Tenants - Sept25.xlsx"
@@ -109,76 +103,85 @@ def add_to_excel_sheet(page, image):
 
     company_index = page[-1]
     target = "Enbridge" if company_index == 0 else "Logan City" if company_index == 1 else None
-
     if not target:
         return image
 
     values_to_write = page[1:]
     cell_to_start = find_starting_cell(ws, target)
-
     if not cell_to_start:
         return image
 
     header_row = cell_to_start.row - 1
-    month_col, base_cell = find_month_column(ws, header_row, month_name)
-
-    if not month_col:
+    result = find_month_column(ws, header_row, month_name)
+    if not result:
         return image
 
-    base_target_rows = [2, 6, 5, 4]
+    month_col, base_cell = result
+    base_target_rows = [2,6,5,4]
     target_rows = [num + base_cell for num in base_target_rows]
-
     write_values(ws, values_to_write, target_rows, month_col)
     wb.save(file_path)
-    print(f"Data written successfully for {target} on tab '{page[0]}'.")
     return add_stamp(image)
 
 def get_utility_company(image):
-    avg = tuple(int(x) for x in np.array(image).mean(axis=(0, 1)))
-    enbridge_min, enbridge_max = (239, 239, 239), (249, 249, 249)
-    logan_min, logan_max = (222, 226, 231), (232, 236, 241)
-    if all(enbridge_min[i] <= avg[i] <= enbridge_max[i] for i in range(3)):
+    avg = tuple(int(x) for x in np.array(image).mean(axis=(0,1)))
+    enbridge_min,enbridge_max=(239,239,239),(249,249,249)
+    logan_min,logan_max=(222,226,231),(232,236,241)
+    if all(enbridge_min[i]<=avg[i]<=enbridge_max[i] for i in range(3)):
         return 0
-    elif all(logan_min[i] <= avg[i] <= logan_max[i] for i in range(3)):
+    elif all(logan_min[i]<=avg[i]<=logan_max[i] for i in range(3)):
         return 1
     return 2
 
 def process_images(images):
-    list_of_pages = []
-    image_list = []
+    list_of_pages=[]
+    image_list=[]
     for image in images:
-        print(image)
-        page = []
-        company = get_utility_company(image)
-        if company != 2:
-            is_empty, data = process_just_service_address(image, company)
+        page=[]
+        company=get_utility_company(image)
+        if company!=2:
+            is_empty,data=process_just_service_address(image,company)
             if not is_empty:
                 page.append(data)
-                processed_data = process_with_everything(image, company)
+                processed_data=process_with_everything(image,company)
                 page.extend(processed_data)
                 page.append(company)
-                image = add_to_excel_sheet(page, image)
+                image=add_to_excel_sheet(page,image)
                 image_list.append(image)
             else:
                 image_list.append(image)
         else:
             image_list.append(image)
-        print(page)
         list_of_pages.append(page)
-    return list_of_pages, image_list
+    return list_of_pages,image_list
+
+def load_pdf_images(pdf_path):
+    if platform.system()=="Windows":
+        try:
+            return convert_from_path(pdf_path,poppler_path=r"C:\poppler\poppler-24.08.0\Library\bin")
+        except:
+            pass
+    images=[]
+    doc=fitz.open(pdf_path)
+    for page in doc:
+        pix=page.get_pixmap(dpi=300)
+        img=Image.frombytes("RGB",[pix.width,pix.height],pix.samples)
+        images.append(img)
+    return images
+
+def configure_tesseract():
+    if platform.system()=="Windows":
+        pytesseract.tesseract_cmd=r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 def main():
     print("Initializing...")
-
-    images = convert_from_path(
-        "PDFs/Utilis 10-27-2025.pdf",
-        poppler_path=r"C:\poppler\poppler-24.08.0\Library\bin",
-    )
+    pdf_path="PDFs/Utilis 10-27-2025.pdf"
+    images=load_pdf_images(pdf_path)
+    configure_tesseract()
     print("Pdf Converted")
-    pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    list_of_pages, image_list = process_images(images)
+    list_of_pages,image_list=process_images(images)
     print(list_of_pages)
     make_and_save_pdf(image_list)
 
-if __name__ == '__main__':
+if __name__=="__main__":
     main()
