@@ -162,6 +162,7 @@ def load_pdf_images(pdf_path):
         except:
             pass
     images=[]
+    print("Path: " + pdf_path)
     doc=fitz.open(pdf_path)
     for page in doc:
         pix=page.get_pixmap(dpi=300)
