@@ -1,0 +1,22 @@
+
+# ---- Project-specific ----
+# macOS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Client data: real utility bills and tenant billing sheets never go in git
+*.pdf
+*.xlsx
+*.xls
+*.sqlite
+
+# OCR debug output
+debug_*.png
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.env
