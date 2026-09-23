@@ -3,7 +3,7 @@ import time
 import string
 
 class Amount(SheetData):
-    CORDS = [(1050, 1500, 1550, 1720),(850, 450, 1550, 600)]
+    CORDS = [(1100, 485, 2350, 590), (1400, 745, 2350, 830)]
     SEARCH_TERM = ["$", "Total Amount Due"]
 
     def __init__(self, image, company_index):

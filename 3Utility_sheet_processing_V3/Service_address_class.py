@@ -2,19 +2,17 @@ from Sheet_Data_Class import SheetData
 import pandas as pd
 import time
 
-# --- 🔹 GLOBAL CACHE ---
-_EXCEL_TABS = None  # Cache of (cleaned_name, original_name)
+_EXCEL_TABS = None
 
 
 def remove_spaces_and_punctuation(s):
-    """Removes spaces and punctuation, converts to lowercase."""
     if not s:
         return ""
     return ''.join(ch for ch in s.lower() if ch.isalnum())
 
 
+# caches tab names so we're not re-reading the workbook for every page
 def get_excel_tabs():
-    """Loads and caches cleaned + original tab names from Excel."""
     global _EXCEL_TABS
     if _EXCEL_TABS is None:
         excel_file = pd.ExcelFile("Utilities Billed to Tenants - Sept25.xlsx")
@@ -26,18 +24,16 @@ def get_excel_tabs():
 
 
 def is_in_list_of_tabs(result):
-    """Checks if any tab name (cleaned) is contained within the cleaned OCR result text."""
     if not result:
         return "Empty"
 
     cleaned_result = remove_spaces_and_punctuation(result)
     for cleaned_tab, original_tab in get_excel_tabs():
         if cleaned_tab in cleaned_result:
-            return original_tab  # ✅ Return actual tab name, not cleaned
+            return original_tab  # return the real tab name, not the cleaned version
     return "Empty"
 
 
-# --- 🔹 BASE OCR CONFIG (shared) ---
 _BASE_CONFIG = (
     r'--oem 3 '
     r'-c preserve_interword_spaces=1 '
@@ -48,15 +44,13 @@ _BASE_CONFIG = (
 
 
 class ServiceAddress(SheetData):
-    CORDS = [(0, 70, 500, 500), (850, 300, 1550, 500)]
+    CORDS = [(50, 590, 1250, 720), (1400, 520, 2350, 650)]
     SEARCH_TERM = ["Service Address", "Service Address"]
 
     def __init__(self, image, company):
         super().__init__(image, company)
 
     def extract_data_from_line(self, line_text):
-        """Extracts data from OCR text and matches it to an Excel tab name."""
-
         new_string = ""
         recording = False
 
@@ -77,8 +71,7 @@ class ServiceAddress(SheetData):
         return ""
 
     def get_custom_config(self):
-        """Uses different OCR modes depending on utility company."""
         if self.utility_company == 0:
             return _BASE_CONFIG + r'--psm 6'
         else:
-            return _BASE_CONFIG + r'--psm 4'
+            return _BASE_CONFIG.replace('tessedit_do_invert=0', 'tessedit_do_invert=1') + r'--psm 6'

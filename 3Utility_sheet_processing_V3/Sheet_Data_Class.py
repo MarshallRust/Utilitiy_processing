@@ -1,6 +1,7 @@
 from pytesseract import pytesseract
 import cv2
 import numpy as np
+import re
 from PIL import Image, ImageFilter, ImageEnhance
 
 class SheetData:
@@ -14,7 +15,7 @@ class SheetData:
         self.utility_company = company
 
     def find_data_in_image(self):
-        """Main OCR loop. Searches bounding box for search term and extracts correct data."""
+        # main OCR loop - keeps widening the crop box until it finds the search term
         size_offset = 0
         add_offset = 25
         if self.utility_company == 2:
@@ -24,10 +25,11 @@ class SheetData:
             new_image = self._crop_image_with_offset(size_offset)
 
             # If we've already tried > 3 times, apply enhanced preprocessing
-            if self.times_tried > 3:
-                ocr_image = self._preprocess(new_image)
-            else:
-                ocr_image = new_image
+            # (disabled - noise removal/contrast preprocessing wasn't working)
+            # if self.times_tried > 3:
+            #     ocr_image = self._preprocess(new_image)
+            # else:
+            ocr_image = new_image
 
             data = self._get_ocr_data(ocr_image)
             if not data['text']:
@@ -46,7 +48,6 @@ class SheetData:
             size_offset, add_offset = self._increase_offset(size_offset, add_offset)
 
     def _crop_image_with_offset(self, size_offset):
-        """Creates bounding box with current offset amount"""
         width, height = self.image.size
         left = max(0, self.left_x - size_offset)
         top = max(0, self.top - size_offset)
@@ -57,25 +58,18 @@ class SheetData:
 
 
     def _preprocess(self, img):
-        """Enhance, binarize, and remove noise/lines for cleaner OCR."""
-
-        # Convert to grayscale (PIL → OpenCV)
+        # enhance, binarize, and strip noise/lines for cleaner OCR
         gray = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2GRAY)
 
-        # Enhance contrast
         pil_img = Image.fromarray(gray)
         contrast = ImageEnhance.Contrast(pil_img).enhance(2.0)
         gray = np.array(contrast)
 
-        # Threshold (binarize)
         _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
 
-        # --- Remove small noise specks ---
-        # This erodes small white regions and then restores text thickness
         kernel = np.ones((2, 2), np.uint8)
         cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        # --- Remove tiny connected components (specks smaller than 10x10) ---
         nb_components, output, stats, centroids = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
         sizes = stats[1:, -1]  # skip background
         min_size = 20  # adjust threshold for noise size
@@ -99,27 +93,24 @@ class SheetData:
         return Image.fromarray(processed)
 
     def _get_ocr_data(self, new_image):
-        """Run OCR on the bounding box"""
         custom_config = self.get_custom_config()
         return pytesseract.image_to_data(
             new_image, lang='eng', config=custom_config, output_type=pytesseract.Output.DICT
         )
 
     def _increase_offset(self, size_offset, add_offset):
-        """Increase offsets to expand bounding box."""
         size_offset += add_offset
         add_offset += 25
         return size_offset, add_offset
 
     def _retry_or_fail(self):
-        """Counts attempts"""
         self.times_tried += 1
         if self.times_tried > 5:
             return False
         return True
 
     def _generate_search_terms(self, term):
-        """Tries multiple versions of the search term"""
+        # try a few variants in case OCR drops a word or the space between them
         terms = [term, term.replace(" ", "")]
         words = term.split()
         for i in range(len(words)):
@@ -127,7 +118,6 @@ class SheetData:
         return terms
 
     def _search_lines_for_term(self, data):
-        """Loop through OCR lines, look for a match, and extract data."""
         num_words = len(data['text'])
         lines_seen = set()
 
@@ -139,14 +129,15 @@ class SheetData:
 
             line_text = self._assemble_line_text(data, line_num, num_words)
             for term_variant in self._generate_search_terms(self.SEARCH_TERM[self.utility_company]):
-                if term_variant.lower() in line_text.lower():
+                # whole-word match only - plain substring let "Date" match inside "BillDate"
+                pattern = r'\b' + re.escape(term_variant.lower()) + r'\b'
+                if re.search(pattern, line_text.lower()):
                     result = self.extract_data_from_line(line_text)
                     if result:
                         return result
         return None
 
     def _assemble_line_text(self, data, line_num, num_words):
-        """Combine all words from a line into a single string."""
         line_words = [
             data['text'][j].strip()
             for j in range(num_words)
@@ -154,15 +145,12 @@ class SheetData:
         ]
         return " ".join(line_words).strip()
 
-    """
-    Overrides
-    """
+    # subclasses override these two
     def extract_data_from_line(self, line_text):
-        """Subclasses implement this to parse the line text and return only the desired data."""
         raise NotImplementedError("Subclasses must override extract_data_from_line()")
 
     def get_custom_config(self):
-        """Return a config that gradually relaxes OCR strictness based on attempts."""
+        # loosens up the whitelist/psm each retry
         base_whitelist = '0123456789$.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
         if self.times_tried == 1:
             whitelist = base_whitelist
@@ -181,7 +169,7 @@ class SheetData:
             f'--oem 3 --psm {psm} '
             f'-c preserve_interword_spaces=1 '
             f'-c tessedit_char_whitelist={whitelist} '
-            f'-c tessedit_do_invert=0 '
+            f'-c tessedit_do_invert={1 if self.utility_company == 1 else 0} '
             f'-c textord_heavy_nr=0 '
             f'-c textord_min_linesize=1 '
             f'-c textord_max_noise_size=5 '

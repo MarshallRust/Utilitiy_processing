@@ -37,51 +37,37 @@ LIST_OF_CORDS = [
 ]
 
 def find_data_using_search_term(index_for_cords, image):
-    # Crop the image to the predefined rectangle for this field (like "Service Address")
     new_image = image.crop(LIST_OF_CORDS[index_for_cords])
-
-    # Choose the text we want to search for based on the index (e.g., "Service Address: ")
     search_term_to_be_found = LIST_OF_SEARCH_ITEMS[index_for_cords]
 
-    # Custom configuration for Tesseract OCR
     custom_config = (
-        r'--oem 3 '  # Use default OCR engine (best available)
-        r'--psm 6 '  # Treat image as a block of text (not a single line or word)
-        r'-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:- '  # Only recognize common characters
-        r'-c preserve_interword_spaces=1 '  # Try to preserve spacing between words
-        r'-c tessedit_do_invert=0 '  # Don't automatically invert colors (e.g., dark-on-light vs light-on-dark)
-        r'-c classify_bln_numeric_mode=1'  # Use numeric bias (useful for digits-heavy text)
+        r'--oem 3 '
+        r'--psm 6 '
+        r'-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:- '
+        r'-c preserve_interword_spaces=1 '
+        r'-c tessedit_do_invert=0 '
+        r'-c classify_bln_numeric_mode=1'
     )
 
-    # Run OCR on the cropped image, returning results as a dictionary of lists
     data = pytesseract.image_to_data(
-        new_image,
-        lang='eng',  # Use English language model
-        config=custom_config,
-        output_type=pytesseract.Output.DICT  # Return structured results for easier access
+        new_image, lang='eng', config=custom_config, output_type=pytesseract.Output.DICT
     )
 
-    # Count how many words were detected by Tesseract
     num_words = len(data['text'])
 
-    # Loop through each word to check its line
+    # group words by line, see if the search term shows up anywhere in the line
     for i in range(num_words):
-        # Get the line number for the current word
         line_num = data['line_num'][i]
 
-        # Collect all non-empty words that are on the same line as the current word
         line_words = [
             data['text'][j]
             for j in range(num_words)
             if data['line_num'][j] == line_num and data['text'][j].strip() != ''
         ]
-
-        # Join those words into a full line of text (e.g., "Service Address: 123 Main St.")
         line_text = " ".join(line_words).strip()
 
-        # Check if our target search term is in this line (case-insensitive)
         if search_term_to_be_found.lower() in line_text.lower():
-            # Gather the bounding box coordinates for the whole line
+            # bounding box around the whole matched line
             lefts = [data['left'][j] for j in range(num_words) if data['line_num'][j] == line_num]
             tops = [data['top'][j] for j in range(num_words) if data['line_num'][j] == line_num]
             rights = [
@@ -92,17 +78,11 @@ def find_data_using_search_term(index_for_cords, image):
                 data['top'][j] + data['height'][j]
                 for j in range(num_words) if data['line_num'][j] == line_num
             ]
-
-            # Create a bounding box from the outermost edges of all words on the line
             cords = (min(lefts), min(tops), max(rights), max(bottoms))
-
-            # Crop that bounding box from the image (just the line of text)
             cropped_image = new_image.crop(cords)
 
-            # Return the full text of the line, the coordinates of the box, and the cropped image
             return line_text, cords, cropped_image
 
-    # If nothing matched our search term, return None and the original image
     return None, None, image
 
 def process_data(data, image, cords, index_for_processing):
