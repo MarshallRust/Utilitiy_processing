@@ -1,0 +1,89 @@
+# Each top-level key is a field to extract. "pattern" is the regex used to
+# pull the value out of the matched line. "validate" names a validator in
+# ocr.py to run on the match before accepting it (currently just "date").
+# "parser" names a custom parser in ocr.py instead of the default
+# regex-match behavior, for fields whose value can't be pulled out with a
+# plain pattern (amount, service_address).
+#
+# Under each field, "enbridge" and "logan" hold the per-company crop box
+# (left, top, right, bottom in pixels), the OCR search term to look for on
+# the page, and whether OCR needs tessedit_do_invert=1 (Logan's bills use
+# white text on a colored background for labels; Enbridge doesn't).
+
+# Logan (and any unrecognized company) date fields use a fixed OCR config
+# instead of the generic ramp-up-by-retry one - the generic whitelist never
+# includes '/', so a date like '10/13/2025' can never match until the
+# retries lucked into an unrestricted whitelist. This one always includes
+# '/', ':', and turns on classify_bln_numeric_mode, matching what V3's
+# Dates class actually used for non-Enbridge bills. Repeated below instead
+# of shared via a YAML anchor - main.py loops over every top-level key in
+# this file as if it were a real field, so nothing non-field-shaped can
+# live at the top level.
+
+bill_date:
+  pattern: '\b\d{1,2}/\d{1,2}/\d{4}\b'
+  validate: date
+  enbridge:
+    box: [850, 200, 1370, 400]
+    term: "As of"
+    invert: false
+  logan:
+    box: [850, 200, 1550, 400]
+    term: "Bill Date"
+    invert: false
+    psm: 4
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
+    extra_config: "-c classify_bln_numeric_mode=1"
+
+due_date:
+  pattern: '\b\d{1,2}/\d{1,2}/\d{4}\b'
+  validate: date
+  enbridge:
+    box: [650, 1480, 1850, 1720]
+    term: "or after"  # "Past Due After" is on a different OCR line than its date on Enbridge bills - "or after" catches the same date from a different sentence on the same line
+    invert: false
+  logan:
+    box: [850, 200, 1550, 400]
+    term: "Due Date"
+    invert: false
+    psm: 4
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
+    extra_config: "-c classify_bln_numeric_mode=1"
+
+effective_dates:
+  pattern: '\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}/\d{1,2}/\d{4}'
+  enbridge:
+    box: [650, 470, 1170, 860]
+    term: "Service from"
+    invert: false
+  logan:
+    box: [850, 250, 1550, 450]
+    term: "Service Period"
+    invert: false
+    psm: 4
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
+    extra_config: "-c classify_bln_numeric_mode=1"
+
+amount:
+  parser: amount
+  enbridge:
+    box: [1100, 485, 2350, 590]
+    term: "$"
+    invert: false
+  logan:
+    box: [1400, 745, 2350, 830]
+    term: "Total Amount Due"
+    invert: true
+
+service_address:
+  parser: address
+  enbridge:
+    box: [50, 590, 1250, 720]
+    term: "Service Address"
+    invert: false
+    psm: 6
+  logan:
+    box: [1400, 520, 2350, 650]
+    term: "Service Address"
+    invert: true
+    psm: 6
