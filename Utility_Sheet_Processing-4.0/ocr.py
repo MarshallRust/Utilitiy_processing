@@ -23,7 +23,7 @@ MAX_RETRIES = 5
 # gets OCR'd as one merged word ("ServiceAddress") and can never match.
 # Confirmed against a real bill: the very first, correctly-positioned crop
 # was failing purely because of this, before any retry/widening even ran.
-BASE_WHITELIST = "0123456789$.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
+BASE_WHITELIST = "0123456789$.,ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
 
 
 def get_field_config(field_name, company):
@@ -54,9 +54,20 @@ def extract_field(image, field_name, company):
             cropped, lang="eng", config=config, output_type=pytesseract.Output.DICT
         )
 
-        line_text = _find_matching_line(data, cfg["term"])
-        if line_text:
+        # Try every line that has the term, not just the first - if the
+        # first one doesn't have a usable value, a later one might.
+        for line_text in _find_matching_lines(data, cfg["term"]):
             value = _extract_value(field_name, line_text, company)
+            if value is not None:
+                return value
+
+        # Some values are distinctive enough to trust without their label
+        # (a 'd/d/yyyy - d/d/yyyy' range only shows up as the service
+        # period). For those, if the label itself didn't OCR - e.g. a dark
+        # shaded label cell - accept the value from anywhere in the crop.
+        if cfg.get("term_optional"):
+            all_text = " ".join(w.strip() for w in data["text"] if w.strip())
+            value = _extract_value(field_name, all_text, company)
             if value is not None:
                 return value
 
@@ -76,9 +87,9 @@ def _tesseract_config(attempt, cfg):
     elif attempt == 1:
         whitelist, psm = BASE_WHITELIST, cfg.get("psm", 6)
     elif attempt == 2:
-        whitelist, psm = BASE_WHITELIST + "-,", cfg.get("psm", 6)
+        whitelist, psm = BASE_WHITELIST + "-", cfg.get("psm", 6)
     elif attempt == 3:
-        whitelist, psm = BASE_WHITELIST + "-, ", cfg.get("psm", 6)
+        whitelist, psm = BASE_WHITELIST + "-/", cfg.get("psm", 6)
     else:
         whitelist, psm = "", 11
 
@@ -93,29 +104,37 @@ def _tesseract_config(attempt, cfg):
     ).strip()
 
 
-def _find_matching_line(ocr_data, term):
-    """Scan OCR'd lines for the search term (word-boundary match, so 'Date'
-    doesn't false-match inside 'BillDate') and return the matching line's text."""
-    num_words = len(ocr_data["text"])
-    lines_seen = set()
-    pattern = r"\b" + re.escape(term.lower()) + r"\b"
+def _term_pattern(term):
+    r"""Word-boundary match for the term, so 'Date' doesn't false-match inside
+    'BillDate'. \b only goes on an edge that's a word character - a term
+    like '$' has no word characters, and '\b\$\b' can never match
+    '... Due $45.67' because there's no word boundary between a space and '$'."""
+    term = term.lower()
+    start = r"\b" if re.match(r"\w", term[0]) else ""
+    end = r"\b" if re.match(r"\w", term[-1]) else ""
+    return start + re.escape(term) + end
 
-    for i in range(num_words):
-        line_num = ocr_data["line_num"][i]
-        if line_num in lines_seen:
+
+def _find_matching_lines(ocr_data, term):
+    """Return the text of every OCR'd line containing the search term, in
+    reading order. Lines are keyed on (block, paragraph, line) - tesseract
+    restarts line_num inside every block, so line_num on its own merges
+    unrelated lines from different parts of the crop into one."""
+    lines = {}
+    for i, word in enumerate(ocr_data["text"]):
+        word = word.strip()
+        if not word:
             continue
-        lines_seen.add(line_num)
+        key = (ocr_data["block_num"][i], ocr_data["par_num"][i], ocr_data["line_num"][i])
+        lines.setdefault(key, []).append(word)
 
-        line_words = [
-            ocr_data["text"][j].strip()
-            for j in range(num_words)
-            if ocr_data["line_num"][j] == line_num and ocr_data["text"][j].strip()
-        ]
-        line_text = " ".join(line_words)
-
+    pattern = _term_pattern(term)
+    matches = []
+    for words in lines.values():
+        line_text = " ".join(words)
         if re.search(pattern, line_text.lower()):
-            return line_text
-    return None
+            matches.append(line_text)
+    return matches
 
 
 def _extract_value(field_name, line_text, company):
@@ -154,34 +173,43 @@ VALIDATORS = {"date": validate_date}
 # amount and service_address can't be pulled out with a plain regex - each
 # company formats them differently enough that they need real logic.
 
-def _parse_amount_enbridge(line_text, company):
-    after_dollar = line_text.split("$", 1)
-    if len(after_dollar) < 2:
-        return None
-    digits = "".join(c for c in after_dollar[1][:7] if c.isdigit() or c in ".,")
-    return _to_float(digits)
+# A price: digits (optionally with thousands commas) and exactly two
+# decimal places, e.g. 206.14 or 1,234.56. Not preceded by another digit,
+# comma or period, and not followed by a third decimal digit, so pieces of
+# longer numbers (account numbers, dates, 206.145) don't count.
+PRICE_RE = re.compile(r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!\d)")
+
+# Anything outside this range is treated as a misread, not a real bill.
+# $0.00 is rejected on purpose - V3's silent "$0.00 on failure" problem
+# means a zero should always get a human look.
+MIN_AMOUNT = 0.01
+MAX_AMOUNT = 5000.00
 
 
-def _parse_amount_logan(line_text, company):
-    term_index = line_text.lower().find("total")
-    if term_index == -1:
-        return None
-    digits = "".join(c for c in line_text[term_index:] if c.isdigit() or c in ".,")[:7]
-    return _to_float(digits)
-
-
-def _to_float(digits):
-    cleaned = digits.replace(",", "")
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
+def _first_price(text):
+    """Return the first valid price in text as a float, or None."""
+    for match in PRICE_RE.finditer(text):
+        value = float(match.group(1).replace(",", "") + "." + match.group(2))
+        if MIN_AMOUNT <= value <= MAX_AMOUNT:
+            return value
+        return None  # the first price-shaped thing is out of range - don't go hunting for another
+    return None
 
 
 def parse_amount(line_text, company):
+    """Read the amount from the text after the label: '$' on Enbridge
+    bills, 'Total Amount Due' on Logan bills. Only accepts something
+    shaped like a price, read up to its second decimal place."""
     if company == "enbridge":
-        return _parse_amount_enbridge(line_text, company)
-    return _parse_amount_logan(line_text, company)
+        parts = line_text.split("$", 1)
+        if len(parts) < 2:
+            return None
+        return _first_price(parts[1])
+
+    term_index = line_text.lower().find("total")
+    if term_index == -1:
+        return None
+    return _first_price(line_text[term_index:])
 
 
 def parse_address(line_text, company):

@@ -7,15 +7,19 @@
 #
 # Under each field, "enbridge" and "logan" hold the per-company crop box
 # (left, top, right, bottom in pixels), the OCR search term to look for on
-# the page, and whether OCR needs tessedit_do_invert=1 (Logan's bills use
+# the page ("term_optional: true" also accepts the value without its label),
+# and whether OCR needs tessedit_do_invert=1 (Logan's bills use
 # white text on a colored background for labels; Enbridge doesn't).
 
-# Logan (and any unrecognized company) date fields use a fixed OCR config
+# Date fields (both companies) use a fixed OCR config
 # instead of the generic ramp-up-by-retry one - the generic whitelist never
 # includes '/', so a date like '10/13/2025' can never match until the
 # retries lucked into an unrestricted whitelist. This one always includes
-# '/', ':', and turns on classify_bln_numeric_mode, matching what V3's
-# Dates class actually used for non-Enbridge bills. Repeated below instead
+# '/' and ':'. Logan's also turns on classify_bln_numeric_mode, matching
+# what V3's Dates class used for non-Enbridge bills. Logan's date boxes
+# point at the lower tables on the bill (Bill Date / Due Date on the
+# right, Service Period on the left) - the matching rows in the top table
+# OCR inconsistently. Repeated below instead
 # of shared via a YAML anchor - main.py loops over every top-level key in
 # this file as if it were a real field, so nothing non-field-shaped can
 # live at the top level.
@@ -27,11 +31,12 @@ bill_date:
     box: [850, 200, 1370, 400]
     term: "As of"
     invert: false
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
   logan:
-    box: [850, 200, 1550, 400]
+    box: [1400, 1300, 2350, 1500]  # "Bill Date" row of the lower-right table
     term: "Bill Date"
-    invert: false
-    psm: 4
+    invert: true
+    psm: 6
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
     extra_config: "-c classify_bln_numeric_mode=1"
 
@@ -42,11 +47,12 @@ due_date:
     box: [650, 1480, 1850, 1720]
     term: "or after"  # "Past Due After" is on a different OCR line than its date on Enbridge bills - "or after" catches the same date from a different sentence on the same line
     invert: false
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
   logan:
-    box: [850, 200, 1550, 400]
+    box: [1400, 1300, 2350, 1500]  # "Due Date" row of the lower-right table
     term: "Due Date"
-    invert: false
-    psm: 4
+    invert: true
+    psm: 6
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
     extra_config: "-c classify_bln_numeric_mode=1"
 
@@ -56,11 +62,13 @@ effective_dates:
     box: [650, 470, 1170, 860]
     term: "Service from"
     invert: false
+    whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
   logan:
-    box: [850, 250, 1550, 450]
+    box: [60, 1360, 1380, 1460]  # "Service Period" row of the lower-left table
     term: "Service Period"
-    invert: false
-    psm: 4
+    term_optional: true  # the date range is unique on the page - accept it even if the shaded label doesn't OCR
+    invert: true
+    psm: 6
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
     extra_config: "-c classify_bln_numeric_mode=1"
 
