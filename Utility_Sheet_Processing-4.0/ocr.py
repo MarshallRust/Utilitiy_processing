@@ -5,8 +5,12 @@ just image in, value out. All per-field/per-company specifics (crop box,
 search term, invert flag) live in fields.yaml, not here.
 """
 
+import os
 import re
 import string
+import subprocess
+import sys
+import tempfile
 from datetime import datetime
 
 import yaml
@@ -52,10 +56,7 @@ def extract_field(image, field_name, company):
         )
         cropped = image.crop(crop_box)
 
-        config = _tesseract_config(attempt, cfg)
-        data = pytesseract.image_to_data(
-            cropped, lang="eng", config=config, output_type=pytesseract.Output.DICT
-        )
+        data = ocr_data(cropped, _tesseract_args(attempt, cfg))
 
         # Try every line that has the term, not just the first - if the
         # first one doesn't have a usable value, a later one might.
@@ -80,11 +81,14 @@ def extract_field(image, field_name, company):
     return None
 
 
-def _tesseract_config(attempt, cfg):
+def _tesseract_args(attempt, cfg):
     """Loosen whitelist/psm as attempts climb, unless the field's config
     specifies its own fixed whitelist (e.g. date fields need '/', which
     never appears in the generic ramp) - in that case, use it every attempt
-    instead of ramping. Invert and psm-override always come from cfg."""
+    instead of ramping. Invert and psm-override always come from cfg.
+
+    Returned as a list of separate arguments, not one config string - see
+    ocr_data() for why."""
     if "whitelist" in cfg:
         whitelist, psm = cfg["whitelist"], cfg.get("psm", 6)
     elif attempt == 1:
@@ -94,17 +98,64 @@ def _tesseract_config(attempt, cfg):
     elif attempt == 3:
         whitelist, psm = BASE_WHITELIST + "-/", cfg.get("psm", 6)
     else:
-        whitelist, psm = "", 11
+        whitelist, psm = "", 11  # empty whitelist = no restriction
 
     invert = 1 if cfg.get("invert") else 0
-    extra = cfg.get("extra_config", "")
-    return (
-        f"--oem 3 --psm {psm} "
-        f"-c preserve_interword_spaces=1 "
-        f'-c tessedit_char_whitelist="{whitelist}" '
-        f"-c tessedit_do_invert={invert} "
-        f"{extra}"
-    ).strip()
+    return [
+        "--oem", "3",
+        "--psm", str(psm),
+        "-c", "preserve_interword_spaces=1",
+        "-c", f"tessedit_char_whitelist={whitelist}",
+        "-c", f"tessedit_do_invert={invert}",
+        *cfg.get("extra_config", "").split(),
+    ]
+
+
+def ocr_data(image, args):
+    """Run tesseract on an image and return its word-by-word results as a
+    dict of lists (text, block_num, par_num, line_num, ...), the same shape
+    as pytesseract's image_to_data(..., output_type=DICT).
+
+    This calls tesseract directly instead of going through
+    pytesseract.image_to_data, because pytesseract takes its options as one
+    string and splits it with shlex - and on Windows it splits with
+    different quoting rules, so a whitelist containing a space (which ours
+    needs) breaks with "No closing quotation". Passing each argument
+    separately avoids any splitting, on every OS."""
+    fd, image_path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    try:
+        image.save(image_path, "PNG")
+        cmd = [pytesseract.tesseract_cmd, image_path, "stdout", "-l", "eng", *args, "tsv"]
+        extra = {}
+        if sys.platform == "win32":
+            extra["creationflags"] = subprocess.CREATE_NO_WINDOW  # no console flashing up per call
+        proc = subprocess.run(cmd, capture_output=True, timeout=120, **extra)
+    finally:
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+    if proc.returncode != 0:
+        message = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"tesseract failed ({proc.returncode}): {message[-300:]}")
+    return _parse_tsv(proc.stdout.decode("utf-8", errors="replace"))
+
+
+def _parse_tsv(tsv):
+    lines = tsv.splitlines()
+    if not lines:
+        return {"text": [], "block_num": [], "par_num": [], "line_num": []}
+    header = lines[0].split("\t")
+    data = {name: [] for name in header}
+    for line in lines[1:]:
+        parts = line.split("\t")
+        if len(parts) < len(header) - 1:
+            continue
+        parts += [""] * (len(header) - len(parts))  # a word with no text drops the last column
+        for name, value in zip(header, parts):
+            data[name].append(int(value) if name != "text" and value.lstrip("-").isdigit() else value)
+    return data
 
 
 def _term_pattern(term):

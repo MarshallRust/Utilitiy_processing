@@ -71,6 +71,34 @@ def selftest(report_path):
         return text.strip()
     check("OCR reads a test image", ocr_reads_text)
 
+    def field_reads():
+        # The same calls the real run makes, with the same whitelists
+        # (spaces, '/', numeric mode). These are what broke on Windows the
+        # first time, so the build fails if they ever break again.
+        from PIL import Image, ImageDraw, ImageFont
+        import ocr
+        try:
+            font = ImageFont.truetype("arial.ttf", 64)
+        except OSError:
+            font = ImageFont.load_default(size=64)
+        results = []
+        for text, cfg, term, check_value in [
+            ("Total Amount Due 206.14", {"psm": 6}, "Total Amount Due",
+             lambda line: ocr.parse_amount(line, "logan") == 206.14),
+            ("Bill Date 10/22/2025", ocr.get_field_config("bill_date", "logan"), "Bill Date",
+             lambda line: "10/22/2025" in line),
+            ("Service Address 420 N 400 E", {"psm": 6}, "Service Address",
+             lambda line: ocr.parse_address(line, "logan") == "420 N 400 E"),
+        ]:
+            image = Image.new("RGB", (1800, 200), "white")
+            ImageDraw.Draw(image).text((40, 50), text, fill="black", font=font)
+            cfg = {k: v for k, v in cfg.items() if k != "invert"}  # test image is dark-on-light
+            lines = ocr._find_matching_lines(ocr.ocr_data(image, ocr._tesseract_args(1, cfg)), term)
+            assert lines and check_value(lines[0]), f"{text!r} read as {lines!r}"
+            results.append(lines[0])
+        return " | ".join(results)
+    check("field OCR with whitelists", field_reads)
+
     def pdf_round_trip():
         import fitz
         from pdf_io import iter_pages, save_stamped_copy
