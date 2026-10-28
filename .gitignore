@@ -20,3 +20,10 @@ __pycache__/
 venv/
 .venv/
 .env
+
+# Windows build output and secrets
+client_secret.json
+Utility_Sheet_Processing-4.0/tesseract/
+build/
+dist/
+*.spec

@@ -1,103 +1,118 @@
 """
-Orchestrates a full run: load a PDF, work out what's on each page, write
-everything to Excel, and produce one output PDF with every page in its
-original order - pages entered into the spreadsheet are stamped "ENTERED",
-everything else is left as-is.
+Entry point.
 
-Run with --dry-run to see what would happen without saving the
-spreadsheet or making any PDFs.
+    python main.py                          opens the window (what the .exe does)
+    python main.py --cli BILLS.pdf          runs from the terminal
+    python main.py --cli BILLS.pdf --dry-run   ...without writing anything
+    python main.py --selftest [REPORT.txt]  checks OCR + PDF handling work
+                                            (the Windows build runs this)
 """
 
 import sys
-from dataclasses import dataclass
+import traceback
 from pathlib import Path
 
-from classify import classify
-from excel_writer import resolve_tab_name, write_all_to_excel
-from ocr import FIELDS, extract_field
-from pdf_io import add_stamp, load_pdf_images, make_and_save_pdf
 
-# All paths are relative to this script's folder, not wherever you run it from.
-BASE_DIR = Path(__file__).resolve().parent
-PDF_PATH = BASE_DIR / "PDFs" / "Utilis 10-27-2025.pdf"  # TODO: pull from config instead of hardcoding
-STAMP_PATH = BASE_DIR / "Pictures" / "Entered_no_bg.png"
-OUTPUT_DIR = BASE_DIR / "PDFs" / "processed_pdfs"
-STAMP_POSITION = (650, 1280)
+def run_cli(args):
+    import google_sheets
+    import pipeline
+    import settings
+    from app_paths import configure_tesseract
 
+    pdfs = [a for a in args if not a.startswith("--")]
+    if not pdfs:
+        print(__doc__)
+        return 2
+    configure_tesseract()
 
-@dataclass
-class PageResult:
-    page: int  # 1-based page number in the PDF
-    company: str
-    address: str
-    bill_date: str | None = None
-    amount: float | None = None
-    effective_dates: str | None = None
-    due_date: str | None = None
-
-
-def process_page(image, page_num) -> tuple[PageResult | None, str | None]:
-    """Returns (result, None) for a page that should be split between
-    tenants, or (None, reason) for one that shouldn't: unrecognized company,
-    unreadable address, untracked property, or a unit/utility-specific bill."""
-    company = classify(image)
-    if company is None:
-        return None, "unrecognized company"
-
-    raw_address = extract_field(image, "service_address", company)
-    if raw_address is None:
-        return None, "couldn't read the service address"
-
-    tab_name, reason = resolve_tab_name(raw_address)
-    if tab_name is None:
-        return None, f"{raw_address!r}: {reason}"
-
-    result = PageResult(page=page_num, company=company, address=tab_name)
-    for field_name in FIELDS:
-        if field_name == "service_address":
-            continue
-        setattr(result, field_name, extract_field(image, field_name, company))
-    return result, None
-
-
-def main(dry_run=False):
-    images = load_pdf_images(PDF_PATH)
-
-    candidates = []
-    not_entered = {}  # page number -> reason it wasn't entered
-
-    for page_num, image in enumerate(images, start=1):
-        result, reason = process_page(image, page_num)
-        if result is None:
-            not_entered[page_num] = reason
-        else:
-            candidates.append(result)
-
-    # Only pages that actually landed in the spreadsheet get stamped.
-    written, skipped = write_all_to_excel(candidates, save=not dry_run)
-    for result, reason in skipped:
-        not_entered[result.page] = f"{result.address} ({result.company}): {reason}"
-
-    written_pages = {r.page for r in written}
+    creds = google_sheets.load_saved_credentials() or google_sheets.sign_in()
+    sheet_id = google_sheets.sheet_id_from_link(settings.load()["sheet_link"])
+    summary = pipeline.run(
+        Path(pdfs[0]).expanduser().resolve(),
+        google_sheets.Sheet(creds, sheet_id),
+        dry_run="--dry-run" in args,
+    )
     print()
-    print("ENTERED:")
-    for r in written:
-        print(f"  page {r.page:>3}  {r.address} ({r.company})  ${r.amount:,.2f}  "
-              f"bill {r.bill_date}  due {r.due_date}  service {r.effective_dates}")
-    print("NOT ENTERED:")
-    for page_num in sorted(not_entered):
-        print(f"  page {page_num:>3}  {not_entered[page_num]}")
+    print(summary.report())
+    return 0
 
-    if not dry_run:
-        output_images = [
-            add_stamp(image, STAMP_PATH, STAMP_POSITION) if page_num in written_pages else image
-            for page_num, image in enumerate(images, start=1)
-        ]
-        make_and_save_pdf(output_images, "processed", OUTPUT_DIR)
 
-    print(f"\nEntered: {len(written_pages)}  Not entered: {len(not_entered)}"
-          f"{'  (dry run - nothing saved)' if dry_run else ''}")
+def selftest(report_path):
+    """Exercise everything that can break in packaging, without Google:
+    the bundled Tesseract reads text, PyMuPDF renders and writes a PDF,
+    and the bundled files are present. Writes a report and returns 0/1."""
+    import tempfile
+
+    lines, ok = [], True
+
+    def check(name, fn):
+        nonlocal ok
+        try:
+            lines.append(f"PASS  {name}: {fn()}")
+        except Exception:
+            ok = False
+            lines.append(f"FAIL  {name}:\n{traceback.format_exc()}")
+
+    from app_paths import configure_tesseract, override, resource
+
+    check("tesseract found", configure_tesseract)
+
+    def ocr_reads_text():
+        from PIL import Image, ImageDraw, ImageFont
+        from pytesseract import pytesseract
+        image = Image.new("RGB", (1400, 220), "white")
+        try:
+            font = ImageFont.truetype("arial.ttf", 72)
+        except OSError:
+            font = ImageFont.load_default(size=72)
+        ImageDraw.Draw(image).text((40, 60), "Total Amount Due 206.14", fill="black", font=font)
+        text = pytesseract.image_to_string(image)
+        assert "206.14" in text, f"OCR read {text!r}"
+        return text.strip()
+    check("OCR reads a test image", ocr_reads_text)
+
+    def pdf_round_trip():
+        import fitz
+        from pdf_io import iter_pages, save_stamped_copy
+        import pipeline
+        tmp = Path(tempfile.mkdtemp())
+        src = tmp / "test.pdf"
+        with fitz.open() as doc:
+            for i in range(3):
+                doc.new_page(width=612, height=792).insert_text((72, 72), f"page {i + 1}")
+            doc.save(src)
+        pages = [(n, img.size) for n, img in iter_pages(src)]
+        assert pages == [(n, (2550, 3300)) for n in (1, 2, 3)], pages
+        out = save_stamped_copy(src, tmp / "out.pdf", {2}, pipeline.STAMP_PATH, pipeline.STAMP_POSITION)
+        with fitz.open(out) as doc:
+            sizes = [(round(p.rect.width), round(p.rect.height)) for p in doc]
+        assert sizes == [(612, 792)] * 3, sizes
+        return f"rendered 3 pages, stamped page 2, output pages {sizes}"
+    check("PDF render + stamp", pdf_round_trip)
+
+    check("fields.yaml loads", lambda: f"{len(__import__('ocr').FIELDS)} fields from {override('fields.yaml')}")
+    check("stamp image bundled", lambda: str(resource("Pictures", "Entered_no_bg.png").stat().st_size) + " bytes")
+    check("Google libraries import", lambda: __import__("google_sheets").API)
+    check("window code imports", lambda: __import__("gui").APP_NAME)
+
+    secret = override("client_secret.json")
+    lines.append(("PASS  " if secret.exists() else "WARN  ") + f"client_secret.json present: {secret.exists()}")
+
+    Path(report_path).write_text("\n".join(lines) + f"\n\nRESULT: {'OK' if ok else 'FAILED'}\n", encoding="utf-8")
+    return 0 if ok else 1
+
+
+def main():
+    args = sys.argv[1:]
+    if "--selftest" in args:
+        rest = [a for a in args if a != "--selftest"]
+        return selftest(rest[0] if rest else "selftest_report.txt")
+    if "--cli" in args:
+        return run_cli([a for a in args if a != "--cli"])
+    import gui
+    gui.main()
+    return 0
 
 
 if __name__ == "__main__":
-    main(dry_run="--dry-run" in sys.argv)
+    sys.exit(main())

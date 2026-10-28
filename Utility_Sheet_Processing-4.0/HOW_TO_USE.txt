@@ -1,0 +1,83 @@
+CATALYST UTILITY PROCESSOR - HOW TO USE
+=======================================
+
+What it does
+------------
+Reads the scanned Logan City and Enbridge bills, types the amount, bill
+date, service dates and due date into the "Utilities Billed to Tenants"
+Google Sheet, and saves a copy of the scan with ENTERED stamped on every
+bill that went in.
+
+It only enters bills for a whole property that has its own tab in the
+sheet. Bills for one unit (like "61 W 500 N 101") or one utility (like
+"61 W 500 N WATER") are skipped on purpose, since they aren't split
+between tenants.
+
+It never overwrites anything already in the sheet. If a cell already has
+something in it, that bill is listed for you to check by hand.
+
+
+First time on a computer
+------------------------
+1. Copy "Catalyst Utility Processor.exe" to the desktop.
+2. Double-click it. If Windows shows "Windows protected your PC", click
+   "More info" and then "Run anyway". It only asks once.
+3. Click "Sign in with Google". A browser tab opens. Sign in with your
+   @catalystrentals.com account and click Allow. You can close the tab
+   after it says "Signed in". The app remembers you after this.
+
+
+Every month
+-----------
+1. Scan all the utility bills into one PDF.
+2. Open the app and click "Browse..." to pick that PDF.
+3. Click "Preview (changes nothing)". It takes a few seconds per page.
+   Look over the list:
+     ENTERED       - bills it will type into the sheet
+     NOT ENTERED   - every other page, with the reason
+4. If the preview looks right, click "Enter bills into sheet".
+5. When it's done, click "Open stamped PDF". It's saved in the same
+   folder as your scan, with "processed" and today's date in the name.
+   A .txt file with the same name has the full list.
+6. Anything under NOT ENTERED that should have gone in (a misread, or a
+   cell that already had something in it), enter by hand.
+
+Running it twice on the same PDF is safe. Bills that are already in the
+sheet are listed as "ALREADY IN THE SHEET" and aren't typed in again.
+
+
+Common messages
+---------------
+"not a property in the sheet"
+    The address doesn't match any tab. Normal for properties we don't
+    split. If it SHOULD be split, add a tab named exactly like the
+    address on the bill (for example "420 N 400 E") with the same layout
+    as the other tabs.
+
+"unit or utility bill, not split"
+    Normal - see above.
+
+"couldn't read ..."
+    The scan was too faint or crooked. Rescan that page straighter, or
+    enter it by hand.
+
+"the sheet already has different values here"
+    Something is already in those cells for that month. Check the bill
+    against the sheet and fix it by hand.
+
+"2 bills matched this tab"
+    Two bills for the same address and company. Enter them by hand.
+
+"no column for Nov" / "no 'Logan City' section on this tab"
+    That tab's layout is different from the others. Make it match.
+
+"Your Google account doesn't have edit access to this sheet"
+    Ask whoever owns the sheet to share it with you as an Editor.
+
+"Couldn't reach Google Sheets"
+    The internet dropped. Wait a minute and run it again. Anything that
+    already made it into the sheet is recognized and not typed twice.
+
+Every run is also logged in:
+    %APPDATA%\Catalyst Utility Processor\logs
+(paste that into the File Explorer address bar)

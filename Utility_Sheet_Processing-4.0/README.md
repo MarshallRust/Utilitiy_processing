@@ -1,4 +1,71 @@
-Current plan for 4.0
+# Utility Sheet Processing 4.0
+
+Reads the monthly stack of scanned Logan City and Enbridge bills, writes each whole-property bill into the shared "Utilities Billed to Tenants - CURRENT" Google Sheet, and saves a copy of the scan with ENTERED stamped on the bills that went in. The office runs it as a single Windows .exe with a small window. Nothing has to be installed and there's no server. Office staff instructions are in `HOW_TO_USE.txt`.
+
+## How it decides what to enter
+
+- The service address on the bill has to match a tab name exactly. Spaces and punctuation are ignored. A unit number or utility type on the end ("61 W 500 N 101", "61 W 500 N WATER") means the bill isn't split, so it's skipped.
+- All four values (amount, bill date, service dates, due date) have to read cleanly. The amount has to look like a price, with two decimals and between $0.01 and $5,000. The bill date has to be within the last 120 days, and the due date can't be before the bill date.
+- It never overwrites a cell that has something in it. If the cells already hold the same values, the bill counts as done and gets stamped. If they hold anything else, the bill is listed for a person to check.
+- Two bills that land on the same tab in one run are both skipped.
+- The cells are found by their labels (the company name in column A, "Total Bill" / "Bill Date" / "Service Dates" / "Due Date" in column B, and the Jan-Dec header above). The layout can move around within a tab as long as the labels stay the same.
+
+## Files
+
+| File | What it does |
+| --- | --- |
+| `main.py` | Entry point. Opens the window, or `--cli PDF [--dry-run]` from a terminal, or `--selftest` |
+| `gui.py` | The window |
+| `pipeline.py` | One full run: read pages, decide, write, stamp, save the report |
+| `classify.py` | Logan or Enbridge? Page color first, then the text at the top of the page |
+| `ocr.py` + `fields.yaml` | Reads each value from the page. Crop boxes and labels live in `fields.yaml` |
+| `sheet_layout.py` | Which tab and cells a bill goes in, and whether it's safe to write. No Google code |
+| `google_sheets.py` | Google sign-in, reading tabs, writing cells |
+| `pdf_io.py` | Renders pages one at a time, writes the stamped copy |
+| `app_paths.py`, `settings.py` | Where files live in the .exe vs. source, and remembered settings |
+| `excel_writer.py`, `debug_*.py` | Old - not used anymore |
+
+If a bill layout changes, fix the crop box in `fields.yaml`. To try a fix without rebuilding the .exe, put the edited `fields.yaml` in the same folder as the .exe. It takes priority over the built-in copy.
+
+## Running from source (Mac)
+
+```
+brew install tesseract
+pip install -r requirements.txt
+python main.py                                 # the window
+python main.py --cli "PDFs/bills.pdf" --dry-run  # terminal, changes nothing
+```
+
+`client_secret.json` (see below) has to be in this folder to sign in when running from source. It's gitignored.
+
+## One-time setup before handing off
+
+### 1. Google sign-in (about 10 minutes)
+
+Do this while signed in as a Catalyst account that will still exist after I leave (the admin account), not marshall@. A Google Cloud project owned by a deleted account gets deleted along with it, and every copy of the app would stop being able to sign in.
+
+1. Go to console.cloud.google.com and create a project named "Catalyst Utility Processor".
+2. APIs & Services > Library > search for "Google Sheets API" > Enable.
+3. Google Auth Platform (also called "OAuth consent screen") > Get started. App name "Catalyst Utility Processor", support email = the admin account, **Audience: Internal**, contact email = the admin account. Internal means only @catalystrentals.com accounts can sign in, and sign-ins don't expire every 7 days the way they do on an "External / Testing" app.
+4. Clients > Create client > Application type **Desktop app** > Create > **Download JSON**.
+5. In this GitHub repo: Settings > Secrets and variables > Actions > New repository secret. Name it `GOOGLE_CLIENT_SECRET_JSON` and paste the whole contents of the downloaded file as the value. Also save a copy as `client_secret.json` in this folder for running from source.
+
+### 2. Build the .exe
+
+Push to GitHub, or open the Actions tab > "Build Windows app" > Run workflow. It takes about 5 minutes. When the run finishes, download "Catalyst-Utility-Processor-Windows" from the bottom of the run page. It contains the .exe, `HOW_TO_USE.txt`, and the self-test report from the build.
+
+The build runs the finished .exe's self-test (bundled Tesseract reads a test image, PDF rendering and stamping work, every bundled file is present) and fails if any check fails.
+
+### 3. Hand it over
+
+- Put the .exe and `HOW_TO_USE.txt` in a folder on the shared drive.
+- Make sure everyone who runs it has Editor access to the CURRENT sheet.
+- Give the admin account access to this GitHub repo (or transfer it), so a future change can be rebuilt without me.
+- The .exe isn't code-signed, so Windows shows a "Windows protected your PC" warning the first time on each computer. "More info" > "Run anyway" gets past it, and it's covered in `HOW_TO_USE.txt`.
+
+---
+
+# Planning notes from the V3 → V4 rewrite
 
 Notes from going through V3 before starting the rewrite. Not all of these are bugs - some are just things that made V3 slow, fragile, or annoying to run, and are worth designing around from the start this time instead of bolting on fixes later.
 

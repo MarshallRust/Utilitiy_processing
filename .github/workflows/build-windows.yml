@@ -1,0 +1,91 @@
+# Builds "Catalyst Utility Processor.exe" on a Windows machine, with
+# Tesseract bundled inside, then runs the finished .exe's self-test.
+# Runs on every push that touches the app, or by hand from the Actions tab
+# ("Run workflow"). The .exe is attached to the run as a download.
+#
+# Needs one repository secret (Settings > Secrets and variables > Actions):
+#   GOOGLE_CLIENT_SECRET_JSON = the full contents of the client_secret.json
+#   downloaded from Catalyst's Google Cloud project (see v4 README).
+# Without it the build still works, but the app can't sign in to Google.
+
+name: Build Windows app
+
+on:
+  push:
+    paths:
+      - "Utility_Sheet_Processing-4.0/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Utility_Sheet_Processing-4.0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python libraries
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller==6.11.1
+
+      - name: Install Tesseract
+        run: choco install tesseract -y --no-progress
+
+      - name: Copy Tesseract into the app (English only)
+        run: |
+          $src = "C:\Program Files\Tesseract-OCR"
+          if (-not (Test-Path "$src\tesseract.exe")) { throw "Tesseract didn't install where expected: $src" }
+          Copy-Item $src tesseract -Recurse
+          Get-ChildItem tesseract\tessdata -Filter *.traineddata |
+            Where-Object { $_.Name -notin @("eng.traineddata", "osd.traineddata") } |
+            Remove-Item
+          Remove-Item tesseract\tessdata\script -Recurse -ErrorAction SilentlyContinue
+          Remove-Item tesseract\doc -Recurse -ErrorAction SilentlyContinue
+          if (-not (Test-Path tesseract\tessdata\configs\tsv)) { throw "tessdata\configs\tsv is missing - pytesseract needs it" }
+          "{0:N0} MB" -f ((Get-ChildItem tesseract -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Build the .exe
+        env:
+          CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}
+        run: |
+          $extra = @()
+          if ($env:CLIENT_SECRET) {
+            Set-Content -Path client_secret.json -Value $env:CLIENT_SECRET -NoNewline -Encoding utf8NoBOM
+            $extra += "--add-data=client_secret.json;."
+          } else {
+            Write-Warning "GOOGLE_CLIENT_SECRET_JSON secret isn't set - the app won't be able to sign in to Google."
+          }
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name "Catalyst Utility Processor" `
+            --add-data "fields.yaml;." `
+            --add-data "Pictures\Entered_no_bg.png;Pictures" `
+            --add-data "tesseract;tesseract" `
+            --hidden-import gui --hidden-import google_sheets --hidden-import pipeline `
+            @extra `
+            main.py
+          Remove-Item client_secret.json -ErrorAction SilentlyContinue
+
+      - name: Self-test the built .exe
+        run: |
+          $report = Join-Path $PWD "selftest_report.txt"
+          $p = Start-Process -FilePath "dist\Catalyst Utility Processor.exe" -ArgumentList "--selftest", "`"$report`"" -Wait -PassThru
+          Get-Content $report
+          if ($p.ExitCode -ne 0) { throw "Self-test failed (exit code $($p.ExitCode))" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Catalyst-Utility-Processor-Windows
+          path: |
+            Utility_Sheet_Processing-4.0/dist/Catalyst Utility Processor.exe
+            Utility_Sheet_Processing-4.0/selftest_report.txt
+            Utility_Sheet_Processing-4.0/HOW_TO_USE.txt
+          if-no-files-found: error

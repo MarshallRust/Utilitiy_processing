@@ -8,13 +8,16 @@ search term, invert flag) live in fields.yaml, not here.
 import re
 import string
 from datetime import datetime
-from pathlib import Path
 
 import yaml
 from pytesseract import pytesseract
 
-FIELDS_PATH = Path(__file__).parent / "fields.yaml"
-with open(FIELDS_PATH) as f:
+from app_paths import override
+
+# A fields.yaml placed next to the .exe overrides the bundled one, so a
+# crop box can be adjusted without rebuilding the app.
+FIELDS_PATH = override("fields.yaml")
+with open(FIELDS_PATH, encoding="utf-8") as f:
     FIELDS = yaml.safe_load(f)
 
 MAX_RETRIES = 5
