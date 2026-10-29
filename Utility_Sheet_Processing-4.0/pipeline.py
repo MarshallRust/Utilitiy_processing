@@ -23,6 +23,7 @@ from pathlib import Path
 import sheet_layout
 from app_paths import resource, user_dir
 from classify import classify
+from bill_amounts import read_current_charges
 from ocr import FIELDS as FIELD_CONFIG, extract_field
 from pdf_io import iter_pages, page_count, save_stamped_copy
 
@@ -41,6 +42,7 @@ class PageResult:
     amount: float | None = None
     effective_dates: str | None = None
     due_date: str | None = None
+    note: str | None = None  # why the amount couldn't be trusted, e.g. an auto-pay bill
 
     def describe(self):
         amount = f"${self.amount:,.2f}" if self.amount is not None else "$?"
@@ -97,8 +99,12 @@ def process_page(image, page_num, tab_names):
 
     result = PageResult(page=page_num, company=company, address=tab)
     for field_name in FIELD_CONFIG:
-        if field_name != "service_address":
+        if field_name not in ("service_address", "amount"):
             setattr(result, field_name, extract_field(image, field_name, company))
+
+    # The amount is this month's charges only - never an old unpaid balance -
+    # and only if the bill's own numbers add up (see bill_amounts.py).
+    result.amount, result.note = read_current_charges(image, company)
     return result, None
 
 
@@ -137,6 +143,9 @@ def run(pdf_path, sheet, dry_run=False, progress=print):
     for c in candidates:
         label = f"{c.address} ({sheet_layout.COMPANY_LABELS[c.company]})"
         missing = [f for f in sheet_layout.FIELDS if getattr(c, f) in (None, "")]
+        if c.note:
+            summary.not_entered[c.page] = f"{label}: {c.note}"
+            continue
         if missing:
             summary.not_entered[c.page] = f"{label}: couldn't read {', '.join(missing).replace('_', ' ')}"
             continue

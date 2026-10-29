@@ -28,7 +28,7 @@ bill_date:
   pattern: '\b\d{1,2}/\d{1,2}/\d{4}\b'
   validate: date
   enbridge:
-    box: [850, 200, 1370, 400]
+    box: [1100, 270, 2350, 420]  # "Account Summary as of 10/21/2026", top right
     term: "As of"
     invert: false
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
@@ -44,7 +44,7 @@ due_date:
   pattern: '\b\d{1,2}/\d{1,2}/\d{4}\b'
   validate: date
   enbridge:
-    box: [650, 1480, 1850, 1720]
+    box: [1100, 520, 2350, 680]  # small print under the total: "...charged on balance on or after 11/12/2026."
     term: "or after"  # "Past Due After" is on a different OCR line than its date on Enbridge bills - "or after" catches the same date from a different sentence on the same line
     invert: false
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
@@ -59,7 +59,7 @@ due_date:
 effective_dates:
   pattern: '\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}/\d{1,2}/\d{4}'
   enbridge:
-    box: [650, 470, 1170, 860]
+    box: [1080, 700, 2350, 870]  # "Service from 9/24/2026 - 10/19/2026", right column
     term: "Service from"
     invert: false
     whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,.:-/ "
@@ -75,7 +75,7 @@ effective_dates:
 amount:
   parser: amount
   enbridge:
-    box: [1100, 485, 2350, 590]
+    box: [1100, 460, 2350, 660]  # "Total Amount Due Upon Receipt $14.76"
     term: "$"
     invert: false
   logan:

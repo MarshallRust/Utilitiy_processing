@@ -13,6 +13,10 @@ sheet. Bills for one unit (like "61 W 500 N 101") or one utility (like
 "61 W 500 N WATER") are skipped on purpose, since they aren't split
 between tenants.
 
+The amount it enters is THIS MONTH'S CHARGES ONLY. If a bill also
+carries an unpaid balance from an earlier month, that old balance is
+left out so it doesn't get split between the tenants again.
+
 It never overwrites anything already in the sheet. If a cell already has
 something in it, that bill is listed for you to check by hand.
 
@@ -56,6 +60,14 @@ Common messages
 
 "unit or utility bill, not split"
     Normal - see above.
+
+"the bill's numbers don't add up as read"
+    The app double-checks every amount against the bill's total. This
+    means it misread a number, so it didn't enter anything. Enter that
+    bill by hand.
+
+"Enbridge auto-pay bill"
+    Auto-pay bills don't print a total or a due date. Enter by hand.
 
 "couldn't read ..."
     The scan was too faint or crooked. Rescan that page straighter, or

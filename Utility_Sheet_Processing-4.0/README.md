@@ -5,7 +5,10 @@ Reads the monthly stack of scanned Logan City and Enbridge bills, writes each wh
 ## How it decides what to enter
 
 - The service address on the bill has to match a tab name exactly. Spaces and punctuation are ignored. A unit number or utility type on the end ("61 W 500 N 101", "61 W 500 N WATER") means the bill isn't split, so it's skipped.
-- All four values (amount, bill date, service dates, due date) have to read cleanly. The amount has to look like a price, with two decimals and between $0.01 and $5,000. The bill date has to be within the last 120 days, and the due date can't be before the bill date.
+- The amount entered is **this month's charges only**, never an unpaid balance carried over from earlier bills (that would get split between tenants twice). Enbridge: Current Charges + Adjustments. Logan: Current Charges (Penalties are already included in it).
+- Every amount is double-checked against the bill's own arithmetic before it's used (Enbridge: previous balance + payments + current + adjustments = total; Logan: past due + current = total). A misread digit breaks the sum, and the bill goes to a person instead of the sheet. See `bill_amounts.py`.
+- All four values (amount, bill date, service dates, due date) have to read cleanly. The bill date has to be within the last 120 days, and the due date can't be before the bill date.
+- Enbridge auto-pay bills print "AUTO PAY CUSTOMER" instead of a total and have no due date, so they're listed to enter by hand.
 - It never overwrites a cell that has something in it. If the cells already hold the same values, the bill counts as done and gets stamped. If they hold anything else, the bill is listed for a person to check.
 - Two bills that land on the same tab in one run are both skipped.
 - The cells are found by their labels (the company name in column A, "Total Bill" / "Bill Date" / "Service Dates" / "Due Date" in column B, and the Jan-Dec header above). The layout can move around within a tab as long as the labels stay the same.
@@ -19,6 +22,7 @@ Reads the monthly stack of scanned Logan City and Enbridge bills, writes each wh
 | `pipeline.py` | One full run: read pages, decide, write, stamp, save the report |
 | `classify.py` | Logan or Enbridge? Page color first, then the text at the top of the page |
 | `ocr.py` + `fields.yaml` | Reads each value from the page. Crop boxes and labels live in `fields.yaml` |
+| `bill_amounts.py` | Reads this month's charges and checks them against the bill's total |
 | `sheet_layout.py` | Which tab and cells a bill goes in, and whether it's safe to write. No Google code |
 | `google_sheets.py` | Google sign-in, reading tabs, writing cells |
 | `pdf_io.py` | Renders pages one at a time, writes the stamped copy |

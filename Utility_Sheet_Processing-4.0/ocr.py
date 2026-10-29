@@ -41,6 +41,14 @@ def extract_field(image, field_name, company):
     """Crop the page near the field's search term, OCR it, and pull out the
     value. Widens the crop and loosens OCR settings on each retry, same as
     V3 - real bill scans aren't always cropped tight enough on the first try."""
+    return locate_field(image, field_name, company)[0]
+
+
+def locate_field(image, field_name, company):
+    """Same as extract_field, but returns (value, top, bottom): where on the
+    page (in pixels) the line holding the value was found, so neighboring
+    rows of a table can be read relative to it. top/bottom are None when
+    the position isn't known."""
     cfg = get_field_config(field_name, company)
     left, top, right, bottom = cfg["box"]
     size_offset = 0
@@ -60,10 +68,10 @@ def extract_field(image, field_name, company):
 
         # Try every line that has the term, not just the first - if the
         # first one doesn't have a usable value, a later one might.
-        for line_text in _find_matching_lines(data, cfg["term"]):
+        for line_text, line_top, line_bottom in _matching_lines_with_position(data, cfg["term"]):
             value = _extract_value(field_name, line_text, company)
             if value is not None:
-                return value
+                return value, crop_box[1] + line_top, crop_box[1] + line_bottom
 
         # Some values are distinctive enough to trust without their label
         # (a 'd/d/yyyy - d/d/yyyy' range only shows up as the service
@@ -73,12 +81,12 @@ def extract_field(image, field_name, company):
             all_text = " ".join(w.strip() for w in data["text"] if w.strip())
             value = _extract_value(field_name, all_text, company)
             if value is not None:
-                return value
+                return value, None, None
 
         size_offset += add_offset
         add_offset += 25
 
-    return None
+    return None, None, None
 
 
 def _tesseract_args(attempt, cfg):
@@ -171,24 +179,36 @@ def _term_pattern(term):
 
 def _find_matching_lines(ocr_data, term):
     """Return the text of every OCR'd line containing the search term, in
-    reading order. Lines are keyed on (block, paragraph, line) - tesseract
-    restarts line_num inside every block, so line_num on its own merges
-    unrelated lines from different parts of the crop into one."""
+    reading order."""
+    return [text for text, _, _ in _matching_lines_with_position(ocr_data, term)]
+
+
+def _matching_lines_with_position(ocr_data, term):
+    """(text, top, bottom) for every OCR'd line containing the search term,
+    in reading order, with top/bottom in pixels within the OCR'd image.
+    Lines are keyed on (block, paragraph, line) - tesseract restarts
+    line_num inside every block, so line_num on its own merges unrelated
+    lines from different parts of the crop into one."""
+    pattern = _term_pattern(term)
+    return [line for line in ocr_lines(ocr_data) if re.search(pattern, line[0].lower())]
+
+
+def ocr_lines(ocr_data):
+    """Group tesseract's word results into lines: [(text, top, bottom), ...]."""
     lines = {}
     for i, word in enumerate(ocr_data["text"]):
-        word = word.strip()
+        word = str(word).strip()
         if not word:
             continue
         key = (ocr_data["block_num"][i], ocr_data["par_num"][i], ocr_data["line_num"][i])
-        lines.setdefault(key, []).append(word)
-
-    pattern = _term_pattern(term)
-    matches = []
-    for words in lines.values():
-        line_text = " ".join(words)
-        if re.search(pattern, line_text.lower()):
-            matches.append(line_text)
-    return matches
+        entry = lines.setdefault(key, {"words": [], "top": None, "bottom": None})
+        entry["words"].append(word)
+        if "top" in ocr_data and "height" in ocr_data:
+            top = ocr_data["top"][i]
+            bottom = top + ocr_data["height"][i]
+            entry["top"] = top if entry["top"] is None else min(entry["top"], top)
+            entry["bottom"] = bottom if entry["bottom"] is None else max(entry["bottom"], bottom)
+    return [(" ".join(e["words"]), e["top"], e["bottom"]) for e in lines.values()]
 
 
 def _extract_value(field_name, line_text, company):
