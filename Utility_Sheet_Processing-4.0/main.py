@@ -6,6 +6,9 @@ Entry point.
     python main.py --cli BILLS.pdf --dry-run   ...without writing anything
     python main.py --selftest [REPORT.txt]  checks OCR + PDF handling work
                                             (the Windows build runs this)
+    python main.py --ui-selftest [FOLDER]   opens the window with sample bills,
+                                            clicks through every screen, saves
+                                            screenshots (the Windows build runs this)
 """
 
 import sys
@@ -130,8 +133,192 @@ def selftest(report_path):
     return 0 if ok else 1
 
 
+def ui_selftest(out_dir):
+    """Drive the real window through every screen with made-up bills - no
+    OCR, no Google. Fails (returns 1) if anything raises. Screenshots of
+    each screen go in out_dir when the platform allows it."""
+    import time
+    from datetime import date, timedelta
+    from types import SimpleNamespace
+
+    from PIL import Image, ImageDraw
+
+    import gui
+    import pdf_io
+    import pipeline
+    import review
+    from pipeline import FieldRead, PageRead
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log, errors = [], []
+
+    # Dialogs would block an unattended run: answer "yes" and record them.
+    gui.messagebox = SimpleNamespace(
+        showerror=lambda *a, **k: errors.append(f"error dialog: {a[1] if len(a) > 1 else a}"),
+        showinfo=lambda *a, **k: log.append(f"info dialog: {a[1] if len(a) > 1 else a}"),
+        askyesno=lambda *a, **k: True,
+    )
+
+    def fake_page(lines):
+        image = Image.new("RGB", (2550, 3300), "white")
+        draw = ImageDraw.Draw(image)
+        for (x, y), text in lines:
+            draw.text((x, y), text, fill="black")
+        return image
+
+    bill_date = date.today() - timedelta(days=5)
+    due = bill_date + timedelta(days=21)
+    start = bill_date - timedelta(days=30)
+    fmt = lambda d: f"{d.month}/{d.day}/{d.year}"
+    images = {
+        1: fake_page([((1450, 560), "Service Address 100 Main St"), ((1450, 760), "Total Amount Due 206.14")]),
+        2: fake_page([((1150, 330), f"Account Summary as of {fmt(bill_date)}"), ((90, 650), "Service Address: 200 Oak Ave")]),
+        3: fake_page([((1450, 560), "Service Address 100 Main St 2")]),
+        4: fake_page([((100, 100), "Some other company")]),
+    }
+    pdf_io.render_page = lambda pdf, n, dpi=300: images.get(n)
+    pipeline.render_page = pdf_io.render_page
+    pipeline.save_stamped_copy = lambda *a, **k: None
+
+    def bill_fields(amount, check, due_value):
+        def f(value, box, found=True):
+            return FieldRead(value=value, read_value=value, box=box, found=found)
+        return {
+            "amount": FieldRead(value=amount, read_value=amount, box=(1800, 740, 2340, 800), found=amount is not None,
+                                check=check, note=None if amount else "Enbridge auto-pay bill"),
+            "bill_date": f(fmt(bill_date), (1400, 1320, 2340, 1380)),
+            "effective_dates": f(f"{fmt(start)} - {fmt(bill_date)}", (100, 1380, 1300, 1440)),
+            "due_date": f(due_value, (1400, 1400, 2340, 1460), found=due_value is not None),
+        }
+
+    def crop(n, box):
+        return images[n].crop(box)
+
+    pages = [
+        PageRead(page=1, company="logan", raw_address="100 Main St", address="100 Main St",
+                 address_box=(1400, 540, 2340, 620), address_crop=crop(1, (1400, 540, 2340, 620)),
+                 tab="100 Main St", fields=bill_fields(206.14, "past due 0.00 + current 206.14 = total 206.14", fmt(due))),
+        PageRead(page=2, company="enbridge", raw_address="200 Oak Ave", address="200 Oak Ave",
+                 address_box=(60, 630, 1200, 720), address_crop=crop(2, (60, 630, 1200, 720)),
+                 tab="200 Oak Ave", fields=bill_fields(None, None, None)),
+        PageRead(page=3, company="logan", raw_address="100 Main St 2", address="100 Main St 2",
+                 address_box=(1400, 540, 2340, 620), address_crop=crop(3, (1400, 540, 2340, 620)),
+                 tab=None, tab_reason="'100 Main St' + '2' - unit or utility bill, not split"),
+        PageRead(page=4, company=None, address_crop=crop(4, (0, 0, 2550, 1000)),
+                 tab_reason="not recognized as a Logan City or Enbridge bill"),
+    ]
+
+    def grid(company_label):
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return [["x"], ["Account Number:"], ["", " "] + months, [company_label, "Total Bill"],
+                ["", "Bill Date"], ["", "Service Dates"], ["", "Due Date"], ["", "#1 = 50%"]]
+
+    class FakeSheet:
+        writes = []
+        def read_tabs(self, tabs):
+            return {t: grid("Logan City" if t == "100 Main St" else "Enbridge") for t in tabs}
+        def write_cells(self, cells):
+            self.writes.extend(cells)
+
+    sheet = FakeSheet()
+    tabs = ["100 Main St", "200 Oak Ave"]
+    session = review.ReviewSession(out_dir / "sample.pdf", sheet, "Sample sheet", tabs, pages,
+                                   sheet.read_tabs(tabs))
+
+    import tkinter as tk
+    try:
+        root = tk.Tk()
+    except tk.TclError as e:
+        # No desktop to open a window on (some build machines) - not a code problem.
+        (out_dir / "ui_selftest_report.txt").write_text(f"SKIPPED: couldn't open a window here ({e})\n", encoding="utf-8")
+        return 0
+    root.report_callback_exception = lambda *exc: errors.append("".join(traceback.format_exception(*exc)))
+    app = gui.App(root)
+
+    def pump(seconds=0.5, until=None):
+        end = time.time() + 30
+        stop = time.time() + seconds
+        while time.time() < (end if until else stop):
+            root.update()
+            if until and until():
+                break
+            time.sleep(0.02)
+
+    def shot(name):
+        pump(0.6)
+        try:
+            from PIL import ImageGrab
+            x, y = root.winfo_rootx(), root.winfo_rooty()
+            ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(out_dir / f"{name}.png")
+            log.append(f"screenshot {name}.png")
+        except Exception as e:
+            log.append(f"no screenshot for {name}: {e}")
+
+    try:
+        pump(1)
+        shot("0-start")
+        app.start_review(session)
+        shot("1-addresses")
+
+        # Reviewer "fixes" the unit bill into a duplicate, sees it, puts it back.
+        app._address_edited(3, tk.StringVar(value="100 Main St"))
+        assert session.decisions()[1].group == "skip", "duplicate address should block page 1"
+        app._address_edited(3, tk.StringVar(value="100 Main St 2"))
+        assert session.decisions()[1].group == "enter", "page 1 should be back after undoing the edit"
+        assert str(app.continue_button.cget("state")) == "disabled", "Continue must wait for the tick"
+        app.addresses_checked_var.set(True)
+        app._addresses_ticked()
+        app._addresses_done()
+        pump(until=lambda: getattr(app, "bill_page", None) == 1)
+        assert app.bill_page == 1, "should be on the first bill"
+        shot("2-bill-logan")
+
+        app._bill_confirm()  # dates not ticked yet - must refuse
+        assert 1 not in session.confirmed, "confirmed without ticks"
+        for name, var in app.tick_vars.items():
+            var.set(True)
+            app._ticked(1, name)
+        app._bill_confirm()
+        assert 1 in session.confirmed, f"page 1 not confirmed: {session.confirm_problems(1)}"
+        pump(until=lambda: getattr(app, "bill_page", None) == 2)
+        shot("3-bill-autopay")
+
+        app.field_vars["amount"].set("34.05")
+        app.field_vars["due_date"].set(fmt(due))
+        for name, var in app.tick_vars.items():
+            var.set(True)
+            app._ticked(2, name)
+        app._bill_confirm()
+        assert 2 in session.confirmed, f"page 2 not confirmed: {session.confirm_problems(2)}"
+        pump(0.5)
+        shot("4-summary")
+
+        app._write()
+        pump(until=lambda: app.last_summary is not None)
+        assert app.last_summary is not None, "write didn't finish"
+        assert len(app.last_summary.entered) == 2, f"expected 2 entered, got {len(app.last_summary.entered)}"
+        assert len(sheet.writes) == 8, f"expected 8 cells written, got {len(sheet.writes)}"
+        shot("5-done")
+        log.append("edits logged: " + " | ".join(app.last_summary.edits))
+    except Exception:
+        errors.append(traceback.format_exc())
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    (out_dir / "ui_selftest_report.txt").write_text(
+        "\n".join(log + ["", "ERRORS:" if errors else "No errors."] + errors) + "\n", encoding="utf-8")
+    return 1 if errors else 0
+
+
 def main():
     args = sys.argv[1:]
+    if "--ui-selftest" in args:
+        rest = [a for a in args if a != "--ui-selftest"]
+        return ui_selftest(rest[0] if rest else "ui_selftest")
     if "--selftest" in args:
         rest = [a for a in args if a != "--selftest"]
         return selftest(rest[0] if rest else "selftest_report.txt")

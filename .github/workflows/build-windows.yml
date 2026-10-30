@@ -69,7 +69,7 @@ jobs:
             --add-data "fields.yaml;." `
             --add-data "Pictures\Entered_no_bg.png;Pictures" `
             --add-data "tesseract;tesseract" `
-            --hidden-import gui --hidden-import google_sheets --hidden-import pipeline `
+            --hidden-import gui --hidden-import google_sheets --hidden-import pipeline --hidden-import review --hidden-import bill_amounts `
             @extra `
             main.py
           Remove-Item client_secret.json -ErrorAction SilentlyContinue
@@ -81,6 +81,13 @@ jobs:
           Get-Content $report
           if ($p.ExitCode -ne 0) { throw "Self-test failed (exit code $($p.ExitCode))" }
 
+      - name: UI self-test (opens the window and clicks through every screen)
+        run: |
+          $dir = Join-Path $PWD "ui_selftest"
+          $p = Start-Process -FilePath "dist\Catalyst Utility Processor.exe" -ArgumentList "--ui-selftest", "`"$dir`"" -Wait -PassThru
+          Get-Content (Join-Path $dir "ui_selftest_report.txt")
+          if ($p.ExitCode -ne 0) { throw "UI self-test failed (exit code $($p.ExitCode))" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: Catalyst-Utility-Processor-Windows
@@ -88,4 +95,5 @@ jobs:
             Utility_Sheet_Processing-4.0/dist/Catalyst Utility Processor.exe
             Utility_Sheet_Processing-4.0/selftest_report.txt
             Utility_Sheet_Processing-4.0/HOW_TO_USE.txt
+            Utility_Sheet_Processing-4.0/ui_selftest/
           if-no-files-found: error

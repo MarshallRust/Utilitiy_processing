@@ -33,21 +33,112 @@ First time on a computer
 
 Every month
 -----------
-1. Scan all the utility bills into one PDF.
-2. Open the app and click "Browse..." to pick that PDF.
-3. Click "Preview (changes nothing)". It takes a few seconds per page.
-   Look over the list:
-     ENTERED       - bills it will type into the sheet
-     NOT ENTERED   - every other page, with the reason
-4. If the preview looks right, click "Enter bills into sheet".
-5. When it's done, click "Open stamped PDF". It's saved in the same
-   folder as your scan, with "processed" and today's date in the name.
-   A .txt file with the same name has the full list.
-6. Anything under NOT ENTERED that should have gone in (a misread, or a
-   cell that already had something in it), enter by hand.
+1. Open the bills. Open every Logan City and Enbridge envelope that came
+   in the mail. Take out the bills and throw away the return envelopes
+   and inserts. Take out any staples so the stack goes through the
+   scanner's feeder. Only the first page of each bill matters. Extra
+   pages won't hurt anything, they just make it take longer.
+
+2. Scan them to yourself. Put the whole stack in the copier's document
+   feeder, choose scan to email, and send it to your own email address.
+   Scan it as ONE PDF (not one file per page), in color if the copier
+   asks. Crooked or faint pages are the main reason a bill gets missed,
+   so straighten the stack before you scan.
+
+3. Save the PDF. Open that email on the computer and download the
+   attached PDF. Your Downloads folder is fine.
+
+4. Open the app, click "Browse..." to pick that PDF, and click
+   "Read bills". It takes a few seconds per page. Nothing is written
+   to the sheet until the very end, after you've checked everything.
+
+5. Step 1 in the app: check the addresses. Every page is listed with
+   the address it read, right next to a picture of the address on the
+   bill, in three groups:
+     Will be entered       - properties we split
+     Already in the sheet  - done in an earlier run
+     Won't be entered      - everything else, with the reason
+   Compare each address with its picture. Everything under "Will be
+   entered" should be a property we split, and nothing under "Won't be
+   entered" should be. If the app misread an address, fix it in its box
+   and press Enter - the line under it shows where it goes now.
+   Tick "I've compared every address with its picture", then Continue.
+
+6. Step 2: check each bill. One bill at a time, the page is shown with
+   a numbered box around every value it read, and on the right each
+   value next to a close-up of that spot:
+     1 Total Bill, 2 Bill Date, 3 Service Dates, 4 Due Date
+   Compare each value with its close-up. If one's wrong or missing,
+   type the right one in its box. Tick "Looks right" for each (fixing a
+   value ticks it for you). Total Bill comes already ticked when the
+   app checked it against the bill's own math - the green line under
+   it shows that check.
+   Then "Confirm and next". If a bill shouldn't go in at all, use
+   "Skip this bill" and enter it by hand later if needed.
+   (Total Bill is this month's charges only. If the bill also shows an
+   unpaid balance from before, that's left out on purpose.)
+
+7. Step 3: the app shows exactly what it's about to write. Look it
+   over and click "Write ... bill(s) to the sheet".
+
+8. Do the split in Propertyware for every bill that went into the
+   sheet. See the next section.
+
+9. Send it to James. Click "Open stamped PDF" in the app and email that
+   PDF to James. It has every page you scanned, including the bills
+   that weren't split, with ENTERED stamped on the ones that went into
+   the sheet. ("Open folder" shows where it's saved, for attaching.)
+
+Anything you fixed or typed in during the review is listed at the bottom
+of the run's report under "CHANGED DURING REVIEW", so there's a record
+of what the app read and what a person changed.
 
 Running it twice on the same PDF is safe. Bills that are already in the
 sheet are listed as "ALREADY IN THE SHEET" and aren't typed in again.
+
+
+Doing the split in Propertyware
+-------------------------------
+Do this once for each bill that went into the sheet. The easiest way is
+to copy last month's bill for the same account and change the numbers.
+
+Find last month's bill
+1. In the search bar at the top of Propertyware, type the company name
+   (Enbridge or City of Logan) and click the vendor in the list - the
+   one with the truck icon, like "Enbridge Gas".
+2. On the left, click "Vendor Ledger".
+3. Set Period to "Last Quarter" and click GO.
+4. Scroll to the bottom and set "Show rows" to 50.
+5. Press Ctrl + F and type the bill's account number. It's at the top
+   of the property's tab in the sheet, under "Account Number:", and on
+   the paper bill. In Propertyware it shows up in the Ref # column.
+6. On the row it finds, click "View". Use a row whose Type is "Bill",
+   not "Bill Payment".
+7. At the bottom of that bill, click "CLONE".
+
+Fill in the new bill
+8. Copy this month's column from the sheet into the cloned bill:
+     Bill Date    <- Bill Date
+     Due Date     <- Due Date
+     Description  <- keep the company name and change the dates to the
+                     Service Dates, like:
+                     Enbridge Gas - 9/18/2026 - 10/19/2026
+     Amount       <- Total Bill (the Amount box under Bill Splits)
+   Leave Vendor, Ref#, Terms, Location and Account the way they cloned.
+
+9. Under "Expense Recoveries", click "NEW TENANT CHARGE" once for each
+   tenant and fill in the row:
+     Lease    - the dropdown is grouped by unit (#1ATTIC, #2EAST, ...).
+                Pick the ACTIVE lease under that unit. Ignore the
+                Terminated ones.
+     Account  - 4101-35 - Utility Reimbursement
+     Date     - the bill date
+     Amount   - that unit's share from the sheet (the rows under Due
+                Date, like "1 - Attic = 20%")
+   Skip a unit if the sheet shows 0% for it, or if it has no Active
+   lease.
+
+10. Save the bill.
 
 
 Common messages
@@ -63,11 +154,13 @@ Common messages
 
 "the bill's numbers don't add up as read"
     The app double-checks every amount against the bill's total. This
-    means it misread a number, so it didn't enter anything. Enter that
-    bill by hand.
+    means it misread a number. In step 2, type the Current Charges
+    amount from the bill into Total Bill.
 
 "Enbridge auto-pay bill"
-    Auto-pay bills don't print a total or a due date. Enter by hand.
+    Auto-pay bills don't print a total or a due date. In step 2, type
+    the Current Charges amount and a due date from the bill, or skip
+    it.
 
 "couldn't read ..."
     The scan was too faint or crooked. Rescan that page straighter, or

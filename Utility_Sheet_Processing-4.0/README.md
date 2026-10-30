@@ -4,8 +4,11 @@ Reads the monthly stack of scanned Logan City and Enbridge bills, writes each wh
 
 ## How it decides what to enter
 
+Nothing is written until a person has checked it. The app reads the whole PDF first, then shows every address next to a picture of where it was read from (step 1), then each bill that will be entered with every value next to its spot on the page (step 2), then exactly what will be written (step 3). Each value needs a "looks right" tick before a bill can be confirmed. Anything the reviewer changes is logged in the report. `python main.py --cli` still runs without review, for testing on a Mac.
+
+
 - The service address on the bill has to match a tab name exactly. Spaces and punctuation are ignored. A unit number or utility type on the end ("61 W 500 N 101", "61 W 500 N WATER") means the bill isn't split, so it's skipped.
-- The amount entered is **this month's charges only**, never an unpaid balance carried over from earlier bills (that would get split between tenants twice). Enbridge: Current Charges + Adjustments. Logan: Current Charges (Penalties are already included in it).
+- The amount entered is **this month's charges only**, never an unpaid balance carried over from earlier bills (that would get split between tenants twice). Enbridge: the Current Charges line in the Account Summary at the top. Logan: Current Charges (Penalties are already included in it).
 - Every amount is double-checked against the bill's own arithmetic before it's used (Enbridge: previous balance + payments + current + adjustments = total; Logan: past due + current = total). A misread digit breaks the sum, and the bill goes to a person instead of the sheet. See `bill_amounts.py`.
 - All four values (amount, bill date, service dates, due date) have to read cleanly. The bill date has to be within the last 120 days, and the due date can't be before the bill date.
 - Enbridge auto-pay bills print "AUTO PAY CUSTOMER" instead of a total and have no due date, so they're listed to enter by hand.
@@ -18,11 +21,12 @@ Reads the monthly stack of scanned Logan City and Enbridge bills, writes each wh
 | File | What it does |
 | --- | --- |
 | `main.py` | Entry point. Opens the window, or `--cli PDF [--dry-run]` from a terminal, or `--selftest` |
-| `gui.py` | The window |
-| `pipeline.py` | One full run: read pages, decide, write, stamp, save the report |
+| `gui.py` | The window: start, step 1 (addresses), step 2 (each bill), step 3 (summary), done |
+| `pipeline.py` | A run in three stages: read every page, decide, write + stamp + report |
 | `classify.py` | Logan or Enbridge? Page color first, then the text at the top of the page |
 | `ocr.py` + `fields.yaml` | Reads each value from the page. Crop boxes and labels live in `fields.yaml` |
 | `bill_amounts.py` | Reads this month's charges and checks them against the bill's total |
+| `review.py` | The rules behind the review screens: address fixes, value fixes, the "looks right" ticks, confirm/skip, the change log |
 | `sheet_layout.py` | Which tab and cells a bill goes in, and whether it's safe to write. No Google code |
 | `google_sheets.py` | Google sign-in, reading tabs, writing cells |
 | `pdf_io.py` | Renders pages one at a time, writes the stamped copy |

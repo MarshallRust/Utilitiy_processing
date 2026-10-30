@@ -35,6 +35,17 @@ def iter_pages(pdf_path, dpi: int = DPI):
             yield index + 1, image
 
 
+def render_page(pdf_path, page_num, dpi: int = DPI):
+    """One page (1-based) as an image, or None if it can't be rendered.
+    Used by the review screens, which only need the page they're showing."""
+    try:
+        with fitz.open(Path(pdf_path)) as doc:
+            pix = doc[page_num - 1].get_pixmap(dpi=dpi)
+            return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    except Exception:
+        return None
+
+
 def add_stamp(image: Image.Image, stamp: Image.Image, position: tuple[int, int]) -> Image.Image:
     """Paste a transparent stamp onto a page at (x, y) in 300 DPI pixels."""
     base = image.convert("RGBA")
